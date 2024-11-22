@@ -116,6 +116,10 @@ void loop() {
       followLine(position);
       break;
 
+    case RECOVERING:
+      recoverFromLineLoss();
+      break;
+
     case CALIBRATING:
       break;
   }
@@ -197,6 +201,11 @@ void calibrate() {
         digitalWrite(ledPin, LOW);
         delay(200);
       }
+
+      if (digitalRead(calibrationButtonPin) == LOW) {
+                calibrationFailCount = 0; 
+                calibrateNow = true;    
+                break;
     }
   } else {
     calibrationFailCount = 0;
