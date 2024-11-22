@@ -12,15 +12,15 @@ int ledPin = 13;
 volatile bool calibrateNow = false; // Flag for calibration
 
 // IR Sensor Pins
-const int SENSOR_COUNT = 8;
-int sensors[SENSOR_COUNT] = {A0, A1, A2, A3, A4, A5, A6, A7}; 
+const int SENSOR_COUNT = 5;
+int sensors[SENSOR_COUNT] = {A0, A1, A2, A3, A4}; 
 
 // calibration values
 int sensorMin[SENSOR_COUNT];
 int sensorMax[SENSOR_COUNT]; 
 bool sensorsCalibrated = false;
 int calibrationFailCount = 0;
-const int MAX_CALIBRATION_FAILS = 3;
+const int MAX_CALIBRATION_FAILS = 2;
 
 //=======================================================================
 //=======================================================================
@@ -64,7 +64,7 @@ void setup() {
 
   attachInterrupt(digitalPinToInterrupt(calibrationButtonPin), triggerCalibration, FALLING);
 
-  for (int i=0; i < SENSOR_COUNT; i++) {
+  for (int i = 0; i < SENSOR_COUNT; i++) {
     pinMode(sensors[i], INPUT);
   }
 
@@ -167,7 +167,7 @@ int getSensorReading(int sensorIndex) {
 
 // based on sensor readings, cal.. position
 int calculatePosition() {
-  int weights[SENSOR_COUNT] = {-3, -2, -1, 0, 1, 2, 3, 4};
+  int weights[SENSOR_COUNT] = {-2, -1, 0, 1, 2};
   int sum = 0, total = 0;
 
   for (int i = 0; i < SENSOR_COUNT; i++) {
@@ -271,10 +271,12 @@ void loop() {
 
   detectBackgroundType();
   if (detectIntersection()) {
+    int leftSpeed = baseSpeed;
+    int rightSpeed = baseSpeed;
     while (leftSpeed > minSpeed && rightSpeed > minSpeed) {
       leftSpeed--;
       rightSpeed--;
-      setMotorSpeed(leftSpeed, rightSpeed)
+      setMotorSpeeds(leftSpeed, rightSpeed);
       delay(10);
     }
     delay(100); // Pause at intersection
