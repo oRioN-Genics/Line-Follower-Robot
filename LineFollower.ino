@@ -6,14 +6,13 @@ int left_motors_en = 9;  // PWMA
 int right_motors_pin1 = 6; // BIN1
 int right_motors_pin2 = 7;  // BIN2
 int right_motors_en = 10; // PWMB
+// IR Sensor Pins
+const int SENSOR_COUNT = 5;
+int sensors[SENSOR_COUNT] = {A0, A1, A2, A3, A4}; 
 
 int calibrationButtonPin = 2; 
 int ledPin = 13;
 volatile bool calibrateNow = false; // Flag for calibration
-
-// IR Sensor Pins
-const int SENSOR_COUNT = 5;
-int sensors[SENSOR_COUNT] = {A0, A1, A2, A3, A4}; 
 
 // calibration values
 int sensorMin[SENSOR_COUNT];
@@ -32,6 +31,10 @@ float kd = 0.5;
 float error = 0, lastError = 0, integral = 0, derivative = 0;
 float correction = 0;
 
+int L_Speed = 0;
+int R_Speed = 0;
+const unsigned long searchDelay = 1000;
+
 int baseSpeed = 150;
 int maxSpeed = 255;
 int minSpeed = 50;
@@ -40,17 +43,19 @@ volatile unsigned long lastDebounceTime = 0;
 const unsigned long debounceDelay = 50;  
 const unsigned long calibrationTime = 5000; // 5 seconds for calibration
 
-const int SHARP_TURN_THRESHOLD = 2; 
-const int SHARP_TURN_SPEED_MULTIPLIER = 2;
+const int SHARP_TURN_THRESHOLD = 2000; 
+const int SHARP_TURN_SPEED_MULTIPLIER = 1.5;
 
 // error States
 enum RobotState {
+  CALIBRATING,
   NORMAL_OPERATION,
   NO_LINE_DETECTED,
-  CALIBRATION_ERROR
+  CALIBRATION_ERROR,
+  RECOVERING
 };
 
-RobotState currentState = NORMAL_OPERATION;
+RobotState currentState = CALIBRATING;
 
 bool isBlackBackground = true; // line type
 
@@ -77,7 +82,48 @@ void setup() {
   calibrate();
 }
 
-//---------------------------------------------------------
+
+void loop() {
+  if (calibrateNow) {
+    calibrate();       
+    calibrateNow = false; 
+  }
+
+  if (!sensorsCalibrated) {
+    setMotorSpeeds(0, 0);
+    return;
+  }
+
+  detectBackgroundType();
+
+  if (detectIntersection()) {
+    handleIntersection();
+    return;
+  } 
+
+  int position = calculatePosition();
+
+  switch (currentState) {
+    case NO_LINE_DETECTED:
+      dashOrLost();
+      break;
+    
+    case CALIBRATION_ERROR:
+      setMotorSpeeds(0, 0);
+      break;
+    
+    case NORMAL_OPERATION:
+      followLine(position);
+      break;
+
+    case CALIBRATING:
+      break;
+  }
+}
+
+//------------------------------------------------------------------------
+//------------------------------------------------------------------------
+
 
 void triggerCalibration() {
   unsigned long currentTime = millis();
@@ -113,6 +159,7 @@ bool validateCalibration() {
 
 void calibrate() {
   digitalWrite(ledPin, HIGH);
+  currentState = CALIBRATING;
 
   for (int i = 0; i < SENSOR_COUNT; i++) {
     sensorMin[i] = 1023; 
@@ -123,10 +170,16 @@ void calibrate() {
   while (millis() - startTime < calibrationTime) {
     for (int i = 0; i < SENSOR_COUNT; i++) {
       int value = smoothSensorReading(sensors[i]);
-      if (value < sensorMin[i]) sensorMin[i] = value;
-      if (value > sensorMax[i]) sensorMax[i] = value;
+      sensorMin[i] = min(sensorMin[i], value);
+      sensorMax[i] = max(sensorMax[i], value);
     }
   }
+
+  for (int i = 0; i < SENSOR_COUNT; i++) {
+        int range = sensorMax[i] - sensorMin[i];
+        sensorMin[i] = max(sensorMin[i] - (range * 0.1), 0); // Adjust min by 10%
+        sensorMax[i] = min(sensorMax[i] + (range * 0.1), 1023); // Adjust max by 10%
+    }
 
   sensorsCalibrated = validateCalibration();
 
@@ -148,11 +201,11 @@ void calibrate() {
   } else {
     calibrationFailCount = 0;
     currentState = NORMAL_OPERATION;
-  }
 
-  // reset PID 
-  integral = 0.1;
-  lastError = 0;
+    // reset PID 
+    integral = 0;
+    lastError = 0;
+  }
 
   digitalWrite(ledPin, LOW);
 }
@@ -165,33 +218,53 @@ int getSensorReading(int sensorIndex) {
 }
 
 
-// based on sensor readings, cal.. position
-int calculatePosition() {
-  int weights[SENSOR_COUNT] = {-2, -1, 0, 1, 2};
-  int sum = 0, total = 0;
-
-  for (int i = 0; i < SENSOR_COUNT; i++) {
-    int value = getSensorReading(i); 
-    sum += value * weights[i];
-    total += value;
-  }
-
-  if (total > 0) {
-    return sum / total;
-  } else {
-    currentState = NO_LINE_DETECTED;
-    return 0;
-  }
+int normalizeSensorValue(int rawValue, int index) {
+    if (rawValue < sensorMin[index]) return 0;
+    if (rawValue > sensorMax[index]) return 1000;
+    return ((rawValue - sensorMin[index]) * 1000) / (sensorMax[index] - sensorMin[index]);
 }
 
 
-void setMotorSpeeds(int leftSpeed,int rightSpeed) {
-  // handle sharp turns
-  if (abs(error) >= SHARP_TURN_THRESHOLD) {
-    leftSpeed *= (error > 0) ? SHARP_TURN_SPEED_MULTIPLIER : 1;
-    rightSpeed *= (error < 0) ? SHARP_TURN_SPEED_MULTIPLIER : 1;
-  }
+int calculatePosition() {
+    int weights[SENSOR_COUNT] = {-2000, -1000, 0, 1000, 2000}; 
+    long weightedSum = 0, totalWeight = 0;
 
+    for (int i = 0; i < SENSOR_COUNT; i++) {
+        int normalizedValue = normalizeSensorValue(analogRead(sensors[i]), i); 
+        weightedSum += (long)normalizedValue * weights[i];
+        totalWeight += normalizedValue;
+    }
+
+    if (totalWeight > 0) {
+        return weightedSum / totalWeight;
+    } else {
+        currentState = NO_LINE_DETECTED;
+        return -9999; 
+    }
+}
+
+
+// based on sensor readings, cal.. position
+// int calculatePosition() {
+//   int weights[SENSOR_COUNT] = {-2, -1, 0, 1, 2};
+//   int sum = 0, total = 0;
+
+//   for (int i = 0; i < SENSOR_COUNT; i++) {
+//     int value = getSensorReading(i); 
+//     sum += value * weights[i];
+//     total += value;
+//   }
+
+//   if (total > 0) {
+//     return sum / total;
+//   } else {
+//     currentState = NO_LINE_DETECTED;
+//     return 0;
+//   }
+// }
+
+
+void setMotorSpeeds(int leftSpeed, int rightSpeed) {
   leftSpeed = constrain(leftSpeed, -maxSpeed, maxSpeed); 
   rightSpeed = constrain(rightSpeed, -maxSpeed, maxSpeed);
 
@@ -218,10 +291,10 @@ void setMotorSpeeds(int leftSpeed,int rightSpeed) {
 
 
 void detectBackgroundType() {
-  static int blackDominantCount = 0;
-  static int whiteDominantCount = 0; 
-  const int detectionThreshold = 20; 
-
+  const int sampleSize = 20;
+  static int samples[sampleSize] = {0};
+  static int sampleIndex = 0;
+  
   int blackCount = 0, whiteCount = 0;
 
   for (int i = 0; i < SENSOR_COUNT; i++) {
@@ -232,78 +305,139 @@ void detectBackgroundType() {
     else whiteCount++;
   }
 
-  if (blackCount > whiteCount) {
-    blackDominantCount++;
-    whiteDominantCount = 0;
-  } else {
-    whiteDominantCount++;
-    blackDominantCount = 0;
+  // store the result of this sample (1 for black dominant, 0 for white dominant)
+  samples[sampleIndex] = (blackCount > whiteCount) ? 1 : 0;
+  sampleIndex = (sampleIndex + 1) % sampleSize;
+
+  int blackDominantCount = 0;
+  for (int i = 0; i < sampleSize; i++) {
+    blackDominantCount += samples[i];
   }
 
-  if (blackDominantCount >= detectionThreshold) {
+  // determine background type based on majority of samples
+  if (blackDominantCount > sampleSize / 2) {
     isBlackBackground = true;
-  } else if (whiteDominantCount >= detectionThreshold) {
+  } else {
     isBlackBackground = false;
   }
 }
 
+
+// void detectBackgroundType() {
+//   static int blackDominantCount = 0;
+//   static int whiteDominantCount = 0; 
+//   const int detectionThreshold = 20; 
+
+//   int blackCount = 0, whiteCount = 0;
+
+//   for (int i = 0; i < SENSOR_COUNT; i++) {
+//     int value = analogRead(sensors[i]);
+//     int threshold = (sensorMin[i] + sensorMax[i]) / 2;
+
+//     if (value < threshold) blackCount++;
+//     else whiteCount++;
+//   }
+
+//   if (blackCount > whiteCount) {
+//     blackDominantCount++;
+//     whiteDominantCount = 0;
+//   } else {
+//     whiteDominantCount++;
+//     blackDominantCount = 0;
+//   }
+
+//   if (blackDominantCount >= detectionThreshold) {
+//     isBlackBackground = true;
+//   } else if (whiteDominantCount >= detectionThreshold) {
+//     isBlackBackground = false;
+//   }
+// }
+
+
 bool detectIntersection() {
   int activeSensors = 0;
   for (int i = 0; i < SENSOR_COUNT; i++) {
-    activeSensors += getSensorReading(i);
+    int normalizedValue = normalizeSensorValue(analogRead(sensors[i]), i);
+    if (normalizedValue > 800) {
+      activeSensors++;
+    }
   }
-
-  return activeSensors == SENSOR_COUNT;
+  return activeSensors >= SENSOR_COUNT - 1;
 }
 
-//---------------------------------------------------------
 
-void loop() {
-  if (calibrateNow) {
-    calibrate();       
-    calibrateNow = false; 
-  }
+void handleIntersection() {
+  setMotorSpeeds(baseSpeed / 2, baseSpeed / 2);
+  delay(100); 
+}
 
-  if (!sensorsCalibrated) {
+
+void dashOrLost() {
+    static unsigned long dashStartTime = 0;
+    static bool isDashing = true;
+
+    if (isDashing) {
+        if (millis() - dashStartTime < searchDelay) {
+            setMotorSpeeds(L_Speed, R_Speed); 
+            if (calculatePosition() != 0) {
+                currentState = NORMAL_OPERATION;
+                return;
+            }
+        } else {
+            isDashing = false; // Switch to search mode
+        }
+    } else {
+        searchForLine(); // fallback to search
+        if (millis() - dashStartTime > 10000) { 
+            currentState = RECOVERING;
+        }
+    }
+}
+
+
+void searchForLine() {
+  static int searchDirection = 1;
+  static unsigned long searchStartTime = millis();
+  static int searchSpeed = baseSpeed / 2;
+  
+  if (millis() - searchStartTime > 5000) { 
     setMotorSpeeds(0, 0);
     return;
   }
-
-  detectBackgroundType();
-  if (detectIntersection()) {
-    int leftSpeed = baseSpeed;
-    int rightSpeed = baseSpeed;
-    while (leftSpeed > minSpeed && rightSpeed > minSpeed) {
-      leftSpeed--;
-      rightSpeed--;
-      setMotorSpeeds(leftSpeed, rightSpeed);
-      delay(10);
+  
+  setMotorSpeeds(-searchSpeed * searchDirection, searchSpeed * searchDirection);
+  delay(50);
+  
+  if (calculatePosition() != 0) { // line found
+    currentState = NORMAL_OPERATION;
+    searchDirection *= -1; // change direction for next search
+    searchSpeed = baseSpeed / 2;
+  } else {
+        searchSpeed = min(searchSpeed + 5, maxSpeed / 2); 
     }
-    delay(100); // Pause at intersection
-    return;
-  }
+}
 
-  int position = calculatePosition();
 
-  switch (currentState) {
-    case NO_LINE_DETECTED:
-      setMotorSpeeds(0, 0);
-      return;
+void recoverFromLineLoss() {
+    static unsigned long recoveryStartTime = millis();
     
-    case CALIBRATION_ERROR:
-      setMotorSpeeds(0, 0);
-      return;
-    
-    case NORMAL_OPERATION:
-      break;
-  }
+    setMotorSpeeds(-baseSpeed / 2, -baseSpeed / 2); // move backward
+    delay(50);
 
-  // no line detected
-  if (position == 0) { 
-    setMotorSpeeds(0, 0); 
-    return; 
-  }
+    if (millis() - recoveryStartTime > 10000) { 
+        setMotorSpeeds(0, 0);
+        digitalWrite(ledPin, HIGH); // failure
+        while (true) {
+            digitalWrite(ledPin, HIGH);
+            delay(200);
+            digitalWrite(ledPin, LOW);
+            delay(200);
+        }
+    }
+}
 
+
+void followLine(int position) {
   error = position;
   integral += error;
   derivative = error - lastError;
@@ -315,7 +449,14 @@ void loop() {
   int leftSpeed = baseSpeed + correction;
   int rightSpeed = baseSpeed - correction;
 
-  setMotorSpeeds(leftSpeed, rightSpeed);
+  // Handle sharp turns
+  if (abs(error) >= SHARP_TURN_THRESHOLD) {
+    leftSpeed *= (error > 0) ? SHARP_TURN_SPEED_MULTIPLIER : 1;
+    rightSpeed *= (error < 0) ? SHARP_TURN_SPEED_MULTIPLIER : 1;
+  }
 
+  setMotorSpeeds(leftSpeed, rightSpeed);
+  L_Speed = leftSpeed;
+  R_Speed = rightSpeed;
   lastError = error;
 }
