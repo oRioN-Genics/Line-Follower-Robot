@@ -253,26 +253,6 @@ int calculatePosition() {
 }
 
 
-// based on sensor readings, cal.. position
-// int calculatePosition() {
-//   int weights[SENSOR_COUNT] = {-2, -1, 0, 1, 2};
-//   int sum = 0, total = 0;
-
-//   for (int i = 0; i < SENSOR_COUNT; i++) {
-//     int value = getSensorReading(i); 
-//     sum += value * weights[i];
-//     total += value;
-//   }
-
-//   if (total > 0) {
-//     return sum / total;
-//   } else {
-//     currentState = NO_LINE_DETECTED;
-//     return 0;
-//   }
-// }
-
-
 void setMotorSpeeds(int leftSpeed, int rightSpeed) {
   leftSpeed = constrain(leftSpeed, -maxSpeed, maxSpeed); 
   rightSpeed = constrain(rightSpeed, -maxSpeed, maxSpeed);
@@ -330,37 +310,6 @@ void detectBackgroundType() {
     isBlackBackground = false;
   }
 }
-
-
-// void detectBackgroundType() {
-//   static int blackDominantCount = 0;
-//   static int whiteDominantCount = 0; 
-//   const int detectionThreshold = 20; 
-
-//   int blackCount = 0, whiteCount = 0;
-
-//   for (int i = 0; i < SENSOR_COUNT; i++) {
-//     int value = analogRead(sensors[i]);
-//     int threshold = (sensorMin[i] + sensorMax[i]) / 2;
-
-//     if (value < threshold) blackCount++;
-//     else whiteCount++;
-//   }
-
-//   if (blackCount > whiteCount) {
-//     blackDominantCount++;
-//     whiteDominantCount = 0;
-//   } else {
-//     whiteDominantCount++;
-//     blackDominantCount = 0;
-//   }
-
-//   if (blackDominantCount >= detectionThreshold) {
-//     isBlackBackground = true;
-//   } else if (whiteDominantCount >= detectionThreshold) {
-//     isBlackBackground = false;
-//   }
-// }
 
 
 bool detectIntersection() {
