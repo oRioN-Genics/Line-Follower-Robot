@@ -62,73 +62,6 @@ bool isBlackBackground = true; // line type
 //=======================================================================
 //=======================================================================
 
-void setup() {
-  Serial.begin(9600);
-
-  pinMode(calibrationButtonPin, INPUT_PULLUP); 
-
-  attachInterrupt(digitalPinToInterrupt(calibrationButtonPin), triggerCalibration, FALLING);
-
-  for (int i = 0; i < SENSOR_COUNT; i++) {
-    pinMode(sensors[i], INPUT);
-  }
-
-  pinMode(left_motors_pin1, OUTPUT);
-  pinMode(left_motors_pin2, OUTPUT);
-  pinMode(right_motors_pin1, OUTPUT);
-  pinMode(right_motors_pin2, OUTPUT);
-  pinMode(ledPin, OUTPUT);
-
-  calibrate();
-}
-
-
-void loop() {
-  if (calibrateNow) {
-    calibrate();       
-    calibrateNow = false; 
-  }
-
-  if (!sensorsCalibrated) {
-    setMotorSpeeds(0, 0);
-    return;
-  }
-
-  detectBackgroundType();
-
-  if (detectIntersection()) {
-    handleIntersection();
-    return;
-  } 
-
-  int position = calculatePosition();
-
-  switch (currentState) {
-    case NO_LINE_DETECTED:
-      dashOrLost();
-      break;
-    
-    case CALIBRATION_ERROR:
-      setMotorSpeeds(0, 0);
-      break;
-    
-    case NORMAL_OPERATION:
-      followLine(position);
-      break;
-
-    case RECOVERING:
-      recoverFromLineLoss();
-      break;
-
-    case CALIBRATING:
-      break;
-  }
-}
-
-//------------------------------------------------------------------------
-//------------------------------------------------------------------------
-
-
 void triggerCalibration() {
   unsigned long currentTime = millis();
   if (currentTime - lastDebounceTime > debounceDelay) {
@@ -158,6 +91,32 @@ bool validateCalibration() {
     }
   }
   return true;
+}
+
+
+void setMotorSpeeds(int leftSpeed, int rightSpeed) {
+  leftSpeed = constrain(leftSpeed, -maxSpeed, maxSpeed); 
+  rightSpeed = constrain(rightSpeed, -maxSpeed, maxSpeed);
+
+  if (leftSpeed > 0) {
+    analogWrite(left_motors_en, leftSpeed);
+    digitalWrite(left_motors_pin1, HIGH);
+    digitalWrite(left_motors_pin2, LOW);
+  } else {
+    analogWrite(left_motors_en, -leftSpeed);
+    digitalWrite(left_motors_pin1, LOW);
+    digitalWrite(left_motors_pin2, HIGH);
+  }
+
+  if (rightSpeed > 0) {
+    analogWrite(right_motors_en, rightSpeed);
+    digitalWrite(right_motors_pin1, HIGH);
+    digitalWrite(right_motors_pin2, LOW);
+  } else {
+    analogWrite(right_motors_en, -rightSpeed);
+    digitalWrite(right_motors_pin1, LOW);
+    digitalWrite(right_motors_pin2, HIGH);
+  }
 }
 
 
@@ -205,18 +164,18 @@ void calibrate() {
       if (digitalRead(calibrationButtonPin) == LOW) {
                 calibrationFailCount = 0; 
                 calibrateNow = true;    
-                break;
+      }
+    } else {
+      calibrationFailCount = 0;
+      currentState = NORMAL_OPERATION;
+
+      // reset PID 
+      integral = 0;
+      lastError = 0;
     }
-  } else {
-    calibrationFailCount = 0;
-    currentState = NORMAL_OPERATION;
 
-    // reset PID 
-    integral = 0;
-    lastError = 0;
-  }
-
-  digitalWrite(ledPin, LOW);
+    digitalWrite(ledPin, LOW);
+   }
 }
 
 
@@ -250,32 +209,6 @@ int calculatePosition() {
         currentState = NO_LINE_DETECTED;
         return -9999; 
     }
-}
-
-
-void setMotorSpeeds(int leftSpeed, int rightSpeed) {
-  leftSpeed = constrain(leftSpeed, -maxSpeed, maxSpeed); 
-  rightSpeed = constrain(rightSpeed, -maxSpeed, maxSpeed);
-
-  if (leftSpeed > 0) {
-    analogWrite(left_motors_en, leftSpeed);
-    digitalWrite(left_motors_pin1, HIGH);
-    digitalWrite(left_motors_pin2, LOW);
-  } else {
-    analogWrite(left_motors_en, -leftSpeed);
-    digitalWrite(left_motors_pin1, LOW);
-    digitalWrite(left_motors_pin2, HIGH);
-  }
-
-  if (rightSpeed > 0) {
-    analogWrite(right_motors_en, rightSpeed);
-    digitalWrite(right_motors_pin1, HIGH);
-    digitalWrite(right_motors_pin2, LOW);
-  } else {
-    analogWrite(right_motors_en, -rightSpeed);
-    digitalWrite(right_motors_pin1, LOW);
-    digitalWrite(right_motors_pin2, HIGH);
-  }
 }
 
 
@@ -417,4 +350,72 @@ void followLine(int position) {
   L_Speed = leftSpeed;
   R_Speed = rightSpeed;
   lastError = error;
+}
+
+//=======================================================================
+//=======================================================================
+
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(calibrationButtonPin, INPUT_PULLUP); 
+
+  attachInterrupt(digitalPinToInterrupt(calibrationButtonPin), triggerCalibration, FALLING);
+
+  for (int i = 0; i < SENSOR_COUNT; i++) {
+    pinMode(sensors[i], INPUT);
+  }
+
+  pinMode(left_motors_pin1, OUTPUT);
+  pinMode(left_motors_pin2, OUTPUT);
+  pinMode(right_motors_pin1, OUTPUT);
+  pinMode(right_motors_pin2, OUTPUT);
+  pinMode(ledPin, OUTPUT);
+
+  calibrate();
+}
+
+//------------------------------------------------------------------------
+//------------------------------------------------------------------------
+
+void loop() {
+  if (calibrateNow) {
+    calibrate();       
+    calibrateNow = false; 
+  }
+
+  if (!sensorsCalibrated) {
+    setMotorSpeeds(0, 0);
+    return;
+  }
+
+  detectBackgroundType();
+
+  if (detectIntersection()) {
+    handleIntersection();
+    return;
+  } 
+
+  int position = calculatePosition();
+
+  switch (currentState) {
+    case NO_LINE_DETECTED:
+      dashOrLost();
+      break;
+    
+    case CALIBRATION_ERROR:
+      setMotorSpeeds(0, 0);
+      break;
+    
+    case NORMAL_OPERATION:
+      followLine(position);
+      break;
+
+    case RECOVERING:
+      recoverFromLineLoss();
+      break;
+
+    case CALIBRATING:
+      break;
+  }
 }
