@@ -1,5 +1,6 @@
 #include <math.h>
 
+#define STBY 12
 int left_motors_pin1 = 3; // AIN1
 int left_motors_pin2 = 4; // AIN2
 int left_motors_en = 9;  // PWMA
@@ -366,11 +367,13 @@ void setup() {
     pinMode(sensors[i], INPUT);
   }
 
+  pinMode(STBY, OUTPUT);
   pinMode(left_motors_pin1, OUTPUT);
   pinMode(left_motors_pin2, OUTPUT);
   pinMode(right_motors_pin1, OUTPUT);
   pinMode(right_motors_pin2, OUTPUT);
   pinMode(ledPin, OUTPUT);
+  digitalWrite(STBY, HIGH);
 
   calibrate();
 }
@@ -419,3 +422,4 @@ void loop() {
       break;
   }
 }
+
